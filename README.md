@@ -1,151 +1,188 @@
       
-# SVG Interactive Dialogue System
+# SVG Interactive Dialogue System (v2 - Choices & Explicit Flow)
 
-This project provides a lightweight, browser-based engine for creating interactive dialogue scenes using SVG graphics with animations. It is driven by a JSON file that defines the sequence of dialogue, text effects, animations (SMIL and CSS), and user interaction triggers.
+This project provides a lightweight, browser-based engine for creating interactive dialogue scenes using SVG graphics with animations. It is driven by a JSON file that defines the sequence of dialogue, text effects, animations (SMIL and CSS), branching choices, and user interaction triggers.
 
 ## Features
 
-*   **JSON-Driven Sequences:** Define dialogue steps, speakers, and flow in a simple JSON file.
-*   **SVG Integration:** Loads and displays external SVG files.
+*   **JSON-Driven Sequences:** Define dialogue steps, speakers, effects, animations, choices, and explicit flow control in a simple JSON file using `stepId`s.
+*   **SVG Integration:** Loads and displays external SVG files specified in the JSON.
 *   **Text Effects:** Supports various effects for displaying dialogue text:
     *   `typewriter`: Text appears character by character.
     *   `blurReveal`: Text fades in, unblurs, and translates up character by character.
     *   `staticBlurReveal`: Text is positioned correctly, then fades in and unblurs character by character.
     *   `fadeIn`: The entire line fades in at once.
     *   `none`: Text appears instantly.
-*   **Variable Text Speed:** Control the speed of `typewriter` and `blurReveal`/`staticBlurReveal` effects via JSON.
+*   **Variable Text Speed:** Control the speed of `typewriter`, `blurReveal`, and `staticBlurReveal` effects via the optional `textEffectSpeed` property in JSON steps.
 *   **Animation Triggering:**
     *   Trigger SMIL animations (`<animate>`, `<animateTransform>`, etc.) embedded within the SVG using `beginElement()`.
     *   Trigger CSS animations by adding/removing classes to SVG elements.
-*   **Multiple Animations:** Trigger several animations simultaneously within a single dialogue step.
+*   **Multiple Animations:** Trigger several animations simultaneously within a single dialogue step by using an array for the `animation` property.
 *   **Animation Control:**
     *   **Stop on Next:** Most animations automatically stop when the user proceeds to the next step.
     *   **Persistent Animations:** Mark specific animations (`persistent: true`) to continue playing across steps.
-    *   **Synced Animations:** Synchronize SMIL animations (`sync: "dialogue"`) to start with the text effect and end when the text finishes displaying.
-*   **Progression Triggers:** Advance the dialogue sequence via:
-    *   `click` (on the dialogue box)
-    *   `keypress` (configurable key, defaults to Space)
-    *   `timer` (automatic advance after a duration)
-*   **Visual Indicators:** Displays a blinking `▶` when waiting for user input, and `■` at the end of the sequence.
-*   **Self-Contained Runtime:** Runs entirely in the browser using plain JavaScript, HTML, and CSS (no external JS libraries required unless you add GSAP support later).
+    *   **Synced Animations:** Synchronize SMIL animations (`sync: "dialogue"`) to start with the text effect and end *only* when the text finishes displaying (requires compatible SMIL setup, e.g., no `fill="freeze"` on loops).
+*   **Dialogue Choices:** Implement branching narratives by presenting choices to the player within a step using the `choices` array.
+*   **Choice Input:** Players can select choices using:
+    *   Mouse clicks.
+    *   Keyboard number keys ('1', '2', '3'...).
+*   **Progression Triggers:** For non-choice steps, define how to advance using `nextTrigger`:
+    *   Requires an explicit `nextStepId` to define the target step.
+    *   Supports trigger types: `click` (on dialogue box), `keypress` (configurable key, defaults to Space), `timer`.
+    *   Supports **multiple triggers** (e.g., advance on *either* click *or* keypress) by providing an array of trigger objects.
+*   **Visual Indicators:**
+    *   Displays a blinking `▶` when waiting for a standard `nextTrigger` (click/key/timer).
+    *   Displays a blinking `▼` when waiting for the player to make a choice.
+    *   Displays a solid `■` at the final step of a sequence path (when no `nextTrigger` or `choices` are defined).
+*   **Local Storage Persistence:** Remembers the player's current step index and resumes from that point on page reload. Includes a "Reset Progress" button.
+*   **Self-Contained Runtime:** Runs entirely in the browser using plain JavaScript, HTML, and CSS.
 
 ## File Structure
 
 ```
-your-project-folder/s
-├── index.html # The main HTML file containing the runtime engine (CSS+JS)
-├── your-scenario.json # Defines the dialogue sequence, animations, and triggers
-└── your-image.svg # Your SVG graphic, potentially with embedded SMIL animations
+your-project-folder/
+├── index.html # Main HTML file containing the runtime engine (CSS+JS)
+├── your-scenario.json # Defines the dialogue sequence, animations, choices, etc.
+└── your-image.svg # Your SVG graphic (potentially with SMIL animations)
 ```
       
 ## Setup
 
-1.  **Prepare Files:** Make sure you have `index.html`, your `your-scenario.json` file, and your `your-image.svg` file ready.
+1.  **Prepare Files:** Place `index.html`, `your-scenario.json`, and `your-image.svg` in the same folder.
 2.  **Crucially: Use a Local Web Server:** Browsers restrict loading local files (`.json`, `.svg`) directly from an HTML file opened via `file:///`. You **must** serve the files using a local HTTP server.
-    *   **Method 1: Python 3 (Commonly Available)**
-        *   Open your terminal/command prompt.
-        *   Navigate (`cd`) to `your-project-folder/`.
+    *   **Method 1: Python 3**
+        *   In terminal: `cd your-project-folder/`
         *   Run: `python3 -m http.server`
-        *   Open your browser to `http://localhost:8000` (or the port specified).
+        *   Open browser to `http://localhost:8000`.
     *   **Method 2: Node.js/npm**
-        *   Navigate (`cd`) to `your-project-folder/`.
+        *   In terminal: `cd your-project-folder/`
         *   Run: `npx serve`
-        *   Open your browser to the `http://localhost:xxxx` address it provides.
+        *   Open browser to the `http://localhost:xxxx` address provided.
     *   **Method 3: VS Code Live Server Extension**
-        *   Install the "Live Server" extension.
-        *   Open `your-project-folder/` in VS Code.
-        *   Right-click `index.html` and choose "Open with Live Server".
+        *   Install "Live Server".
+        *   Open folder in VS Code.
+        *   Right-click `index.html` -> "Open with Live Server".
 
 ## Usage Workflow
 
 1.  **Create/Edit SVG (`your-image.svg`):**
-    *   Design your SVG graphic.
-    *   **Add unique `id` attributes** to any element you want to target with CSS animations (e.g., `<path id="pupille">`) or that contains SMIL animations you want to trigger.
-    *   If adding SMIL animations (`<animate>`, `<animateTransform>`):
-        *   Place the `<animate>` tag **inside** the element it modifies.
-        *   Give the `<animate>` tag a unique `id` if you want to trigger it via JSON (e.g., `<animate id="speak">`).
-        *   Set `begin="indefinite"` on animations you want to trigger via JSON.
-        *   For path morphing (`attributeName="d"`), ensure the path data structures in `values` are compatible (this is tricky without JS libraries!).
+    *   Design graphic.
+    *   **Add unique `id` attributes** to elements targeted by CSS or containing SMIL animations.
+    *   If adding SMIL (`<animate>`):
+        *   Nest inside the element it modifies.
+        *   Add unique `id` if triggering via JSON.
+        *   Set `begin="indefinite"` if triggering via JSON.
+        *   Avoid `fill="freeze"` on looping animations intended for `sync: "dialogue"` control.
+        *   Be wary of `attributeName="d"` morphing compatibility.
 2.  **Define Scenario (`your-scenario.json`):**
-    *   Specify the `svgUrl` pointing to your SVG file.
-    *   Create an array of `steps`, defining dialogue, effects, animations, and triggers (see structure below).
+    *   Specify `svgUrl`.
+    *   Create `steps` array.
+    *   **Crucially:** Give each step a unique `stepId`.
+    *   Ensure every step that is *not* the final step has **either** a `choices` array (with valid `nextStepId`s) **or** a `nextTrigger` object/array containing valid `nextStepId`(s). Use `null` for `nextTrigger` on the final step of a path.
+    *   (See **JSON Structure** below).
 3.  **Configure HTML (`index.html`):**
-    *   Find the `<body>` tag.
-    *   Update the `data-scenario-url` attribute to point to the correct path of your JSON file (e.g., `data-scenario-url="./your-scenario.json"`).
-4.  **Run:** Start your local web server in the project folder and open `index.html` via the `http://localhost:...` address.
+    *   Update `data-scenario-url` in `<body>` to point to your JSON file.
+4.  **Run:** Start local server and open `index.html` via `http://localhost:...`. Use the "Reset Progress" button if needed.
 
 ## JSON Structure (`your-scenario.json`)
 
 ```json
 {
-  "svgUrl": "./path/to/your-image.svg", // Relative path from HTML to your SVG file
+  "svgUrl": "./your-image.svg",
   "steps": [
-    // --- Example Step ---
+    // --- Example Step with Trigger(s) ---
     {
-      "stepId": "unique-step-name", // Optional, but good for reference/debugging
-      "dialogue": "This is the text that will appear. Can include <b>HTML</b> tags.", // The dialogue line
-      "speaker": "Character Name", // Optional: Speaker name (not currently displayed, but available)
-      "textEffect": "typewriter", // Effect to use: "typewriter", "blurReveal", "staticBlurReveal", "fadeIn", "none"
-      "textEffectSpeed": 50, // Optional: Speed override (ms/char for typewriter/blur, stagger delay for reveals)
-      "animation": [ // Can be null, a single animation object, or an array of objects
+      "stepId": "intro", // REQUIRED unique ID for this step
+      "dialogue": "Text here. <b>HTML</b> ok.",
+      "speaker": "Character", // Optional
+      "textEffect": "typewriter", // "typewriter","blurReveal","staticBlurReveal","fadeIn","none"
+      "textEffectSpeed": 50, // Optional speed override
+      "animation": [ /* null, single object, or array */
         {
-          // --- SMIL Example ---
-          "type": "smil",
-          "targetId": "smil-animation-id-in-svg", // ID of the <animate> tag
-          "action": "begin", // Currently only "begin" is implemented for triggering
-          "sync": "dialogue", // Optional: Set to "dialogue" to start with text and stop when text finishes.
-          "persistent": false // Optional: Set to true to prevent animation from stopping on nextTrigger
+          "type": "smil", // "smil" or "css"
+          "targetId": "smil-anim-id",
+          "action": "begin",
+          "sync": "dialogue", // Optional
+          "persistent": false // Optional
         },
-        {
-          // --- CSS Example ---
-          "type": "css",
-          "targetId": "svg-element-id", // ID of the SVG element (<path>, <circle>, etc.)
-          "action": "addClass", // Currently only "addClass" is implemented
-          "className": "your-css-animation-class", // CSS class defined in index.html <style>
-          "persistent": false // Optional: Set true to prevent class removal on nextTrigger
-        }
+        { /* ... other animations ... */ }
       ],
-      "nextTrigger": { // Defines how to move to the next step
-        "type": "click", // "click", "keypress", "timer", or null for the last step
-        // --- Options based on type ---
-        "key": "Enter", // Optional (for "keypress"): Specify key (e.g., "Enter", "ArrowRight"). Defaults to Space (" ").
-        "duration": 3000 // Required (for "timer"): Duration in milliseconds before auto-advancing.
+      // --- Use EITHER nextTrigger OR choices ---
+      "nextTrigger": { // Single trigger example
+        "type": "click", // "click", "keypress", "timer"
+        "nextStepId": "next-step-after-click" // **** REQUIRED ****
+        // "key": "Enter", // Optional for keypress
+        // "duration": 3000 // Required for timer
       }
+      // --- OR Multiple Triggers Example ---
+      // "nextTrigger": [
+      //   { "type": "click", "nextStepId": "next-step-id" }, // REQUIRED
+      //   { "type": "keypress", "key": "Enter", "nextStepId": "next-step-id" } // REQUIRED
+      // ]
+    },
+    // --- Example Step with Choices ---
+    {
+        "stepId": "decision-point", // REQUIRED unique ID
+        "dialogue": "Make your choice.",
+        "textEffect": "staticBlurReveal",
+        "animation": null,
+        // --- Use EITHER nextTrigger OR choices ---
+        "choices": [
+            {
+              "text": "Option One", // Text displayed (numbering added automatically)
+              "nextStepId": "step-after-option-one" // REQUIRED: Target step ID
+            },
+            {
+              "text": "Option Two (<b>HTML</b> ok)",
+              "nextStepId": "step-after-option-two" // REQUIRED
+            }
+        ]
+        // No nextTrigger needed here
+    },
+    // --- Final Step Example ---
+    {
+        "stepId": "end-of-path", // REQUIRED unique ID
+        "dialogue": "The sequence ends here.",
+        "textEffect": "fadeIn",
+        "animation": null,
+        "nextTrigger": null // **** Indicates the end of this sequence path ****
+        // No choices here either
     }
     // ... more step objects
   ]
 }
-```
-    
 
+``` 
 
-## SVG Requirements 
+## SVG Requirements
 
-*  Elements targeted by CSS or containing SMIL need unique ids.
+   * Elements targeted by CSS or containing SMIL need unique ids.
 
-*  SMIL animate / animateTransform tags triggered by JSON need unique ids.
+  * SMIL <animate>/<animateTransform> tags triggered by JSON need unique ids.
 
-*  SMIL animate tags triggered by JSON must have begin="indefinite".
+  * SMIL <animate> tags triggered by JSON must have begin="indefinite".
 
-*  SMIL tags must be nested inside the SVG element they are intended to animate.
+  * SMIL tags must be nested inside the SVG element they animate.
+
+  * Avoid fill="freeze" on looping SMIL animations using sync: "dialogue" if clean stopping is desired.
 
 ## Customization
 
-* Styling: Modify the CSS within the style tags in index.html to change the appearance of the dialogue box, text, SVG container, etc.
+  * Styling: Modify CSS in index.html's <style> tags. Includes styles for dialogue, indicators (#next-indicator), choices (.choice-item), text effects, etc.
 
-* Behavior: Modify the JavaScript within the script tags in index.html to change text effects, add new animation types, or alter the core engine logic.
-
-## Limitations
-
-* No UI Editor: Scenario creation requires manually editing the JSON file.
-
-* SMIL Path Morphing: Reliably morphing complex paths (attributeName="d") with SMIL is difficult due to potential path structure mismatches. 
+  * Behavior: Modify JavaScript in index.html's <script> tag.
 
 
 ## Troubleshooting
 
-* NetworkError / 404 Errors Loading JSON/SVG: You MUST run index.html via a local web server (http://localhost...), not directly as a file:///... URL. See Setup section.
+  * NetworkError / 404 Errors Loading Files: Run via a local web server (http://...), not file:///.... See Setup.
 
-* SMIL Animation Not Found: Double-check the targetId in JSON matches the id in the SVG exactly (case-sensitive). Ensure the animate tag is correctly nested inside the element it animates in the SVG file. Ensure the SVG file saved correctly and clear browser cache (hard refresh). Use browser dev tools (Elements tab) to inspect the loaded SVG structure.
+  * SMIL Animation Not Found/Working: Check id matching (case-sensitive), nesting in SVG, begin="indefinite". Verify correct file is loaded (clear cache). Use browser dev tools (Elements/Console) to inspect loaded SVG and script logs. Check fill="freeze" on synced animations.
 
-* Animation Doesn't Stop: Ensure the persistent flag is not set to true in the JSON for the animation you expect to stop. Check the nextStep function's cleanup logic in the script.
+  * Incorrect Branching / Step Flow: Ensure every non-final step has either choices or a nextTrigger with a valid nextStepId. Check stepIds match exactly. Use console logs in goToStep to trace flow.
+
+  * Syntax Errors / No Dialogue: Check the browser console (F12) for JavaScript errors. Validate JSON syntax. Check for script copy-paste errors.
+
+  * Progress Not Saving/Resuming: Ensure localStorage is enabled. Check console for saving/loading messages/errors. Use "Reset Progress" button if data seems corrupted.
+
+  * Choices Not Working: Ensure the step uses the choices array (not nextTrigger). Check JSON structure for text and nextStepId. Verify click/keydown listeners are being attached correctly (check logs from setupChoiceInputHandlers).

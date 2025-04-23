@@ -2,71 +2,59 @@
   "svgUrl": "./oeil.svg",
   "steps": [
     {
-      "stepId": "intro-speak",
+      "stepId": "start",
+      "dialogue": "You approach the ancient eye...",
+      "textEffect": "staticBlurReveal",
+      "nextTrigger": { "type": "click", "nextStepId": "greeting" }
+    },
+    {
+      "stepId": "greeting",
       "dialogue": "Welcome... I see you have arrived.",
       "speaker": "Mystic Eye",
       "textEffect": "typewriter",
-      "animation": {
-        "type": "smil",
-        "targetId": "speak",
-        "action": "begin"
-        
-      },
-      "nextTrigger": {
-        "type": "click"
-      }
+      "animation": { "type": "smil", "targetId": "speak", "action": "begin" },
+      "nextTrigger": [
+         
+         { "type": "click", "nextStepId": "ask-question" },
+         { "type": "keypress", "key": "Enter", "nextStepId": "ask-question" } 
+      ]
     },
     {
-      "stepId": "pupil-focus",
-      "dialogue": "Look closer... what do you perceive?",
+      "stepId": "ask-question",
+      "dialogue": "Do you seek knowledge, or power?",
       "speaker": "Mystic Eye",
       "textEffect": "blurReveal",
-      "animation": {
-        "type": "css",
-        "targetId": "pupille", 
-        "action": "addClass",
-        "className": "pulse-glow"
-       
-      },
-      "nextTrigger": {
-        "type": "keypress",
-        "key": " "
-      }
+      "animation": { "type": "css", "targetId": "pupille", "action": "addClass", "className": "pulse-glow" },
+      "choices": [
+        { "text": "I seek knowledge.", "nextStepId": "path-knowledge" },
+        { "text": "I desire power!", "nextStepId": "path-power" },
+        { "text": "[Remain Silent]", "nextStepId": "path-silent" }
+      ]
     },
     {
-      "stepId": "wait-short",
-      "dialogue": "Patience...",
-      "speaker": "Mystic Eye",
+      "stepId": "path-knowledge",
+      "dialogue": "Knowledge requires patience. Observe.",
       "textEffect": "fadeIn",
-      "animation": null, 
-      "nextTrigger": {
-        "type": "timer",
-        "duration": 4000 
-      }
+      "animation": { "type": "smil", "targetId": "speak", "action": "begin", "persistent": true },
+      "nextTrigger": { "type": "timer", "duration": 5000, "nextStepId": "final-step" } 
     },
     {
-      "stepId": "loop-persist",
-      "dialogue": "Observe the flow. It continues.",
-      "speaker": "Mystic Eye",
-      "textEffect": "typewriter",
-      "animation": {
-        "type": "smil",
-        "targetId": "speak", 
-        "action": "begin",
-        "persistent": true 
-      },
-      "nextTrigger": {
-        "type": "click"
-       
-      }
+       "stepId": "path-power",
+       "dialogue": "Power comes at a cost!",
+       "textEffect": "typewriter",
+       "nextTrigger": { "type": "click", "nextStepId": "final-step" } 
     },
     {
-      "stepId": "final",
-      "dialogue": "The cycle repeats.",
-      "speaker": "Mystic Eye",
-      "textEffect": "blurReveal",
-      "animation": null,
-      "nextTrigger": null 
+       "stepId": "path-silent",
+       "dialogue": "Silence... Interesting.",
+       "textEffect": "staticBlurReveal",
+       "nextTrigger": { "type": "click", "nextStepId": "final-step" }
+    },
+     {
+       "stepId": "final-step",
+       "dialogue": "Your path is set.",
+       "textEffect": "fadeIn",
+       "nextTrigger": null 
     }
   ]
 }

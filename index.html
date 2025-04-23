@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interactive Dialogue Scene</title>
 
-    <!-- Optional: Include GSAP if you use "type": "gsap" in your JSON -->
-    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script> -->
 
     <style>
      
@@ -128,6 +126,85 @@
             animation: pulse-glow 2s infinite ease-in-out;
         }
 
+        .text-static-blur {
+        display: inline-block;
+        opacity: 0; /* Start invisible */
+        filter: blur(8px); 
+        transition: opacity 0.5s ease-out, filter 0.5s ease-out; 
+        will-change: opacity, filter;
+        }
+
+        .text-static-blur.space {
+        width: 0.3em;
+        /* Keep initial state consistent */
+        opacity: 0;
+        filter: blur(8px);
+        transition: opacity 0.5s ease-out, filter 0.5s ease-out;
+        will-change: opacity, filter;
+        }
+
+        /* State when animation should be active */
+        .text-static-blur.animated {
+        opacity: 1; /* Fade in */
+        filter: blur(0); /* **** MUST HAVE blur(0) HERE **** */
+        }
+
+        #choices-container {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+        #choices-container ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #choices-container li {
+            padding: 8px 12px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+
+        .choice-item {
+            /* Start hidden and blurred */
+            opacity: 0;
+            filter: blur(4px); /* Less blur than text maybe */
+            transform: translateY(10px); /* Optional slight move */
+            transition: opacity 0.4s ease-out, filter 0.4s ease-out, transform 0.4s ease-out;
+            will-change: opacity, filter, transform;
+             /* Inherit list item base styles */
+             padding: 8px 12px;
+             margin: 5px 0;
+             border: 1px solid #ccc;
+             border-radius: 4px;
+             cursor: pointer;
+        }
+        .choice-item:hover { /* Keep hover effect */
+             background-color: #e9e9e9;
+             border-color: #aaa;
+        }
+        /* State when choice should be visible */
+        .choice-item.animated {
+            opacity: 1;
+            filter: blur(0);
+            transform: translateY(0);
+        }
+
+
+        /* Optional: Style for error message area */
+        #error-display {
+            color: red;
+            font-weight: bold;
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid red;
+            background-color: #ffeeee;
+            border-radius: 4px;
+            display: none; /* Initially hidden */
+        }
     
 
     </style>
@@ -136,282 +213,92 @@
 <body data-scenario-url="./scenario.json">
 
     <div class="scene-container">
-        <div id="svg-container">Loading SVG...</div>
+        <!-- SVG container starts empty -->
+        <div id="svg-container"></div>
+        <!-- Dialogue container starts empty (or with non-immersive placeholder if preferred) -->
         <div id="dialogue-container">
-            <p id="dialogue-text-container">Loading scene...</p>
+            <p id="dialogue-text-container"></p>
+            <!-- Choices will be appended here by JS -->
         </div>
+        <!-- Optional: Dedicated Error Display -->
+        <div id="error-display"></div>
+        <!-- Optional: Reset Button -->
+        <button id="reset-progress-button" style="margin-top: 15px;">Reset Progress</button>
     </div>
+
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // --- DOM References ---
             const svgContainer = document.getElementById('svg-container');
-            const dialogueTextContainer = document.getElementById('dialogue-text-container'); // Inner <p> or div for text
-            const mainDialogueContainer = document.getElementById('dialogue-container'); // Outer box
+            const dialogueTextContainer = document.getElementById('dialogue-text-container');
+            const mainDialogueContainer = document.getElementById('dialogue-container');
             const scenarioUrl = document.body.dataset.scenarioUrl;
+            const errorDisplay = document.getElementById('error-display');
+            const resetButton = document.getElementById('reset-progress-button');
 
             // --- State Variables ---
+            const SAVE_KEY = 'dialogueSystemSaveState'; // localStorage key
             let scenarioData = null;
             let currentStepIndex = -1;
-            let svgDocument = null; // Holds the parsed SVG DOM result
-            let activeStepAnimations = []; // Track non-persistent animations { type, reference, targetId }
-            let activeSyncedAnimationTargetId = null; // Track SMIL anim synced with dialogue
-            let activeSyncedAnimationElement = null; // Reference to the synced SMIL element
-            let progressionListener = null; // Holds active listener/timer
-            let currentTriggerType = null; // Type of active listener/timer
-            let currentStepTimeoutId = null; // Timeout ID for indicator/sync stop
+            let svgDocument = null; // Parsed SVG DOM
+            let activeStepAnimations = []; // Track non-persistent animations
+            let activeSyncedAnimationTargetId = null;
+            let activeSyncedAnimationElement = null;
+            let activeListeners = []; // Store multiple listeners { type, handler, element?, id? }
+            let currentStepTimeoutId = null; // Indicator/sync stop timer
+            let choicesContainer = null; // Reference to choices div
+
+            // --- Initialization ---
+            setupResetButton();
+            loadScenario();
 
             // --- Core Functions ---
 
-            async function loadScenario() {
-                if (!scenarioUrl) {
-                    console.error("Scenario URL not specified in body data-scenario-url attribute.");
-                    dialogueTextContainer.textContent = "Error: Scenario URL not specified."; return;
+            function displayError(message) {
+                console.error(message);
+                if (errorDisplay) {
+                    errorDisplay.textContent = message;
+                    errorDisplay.style.display = 'block';
                 }
-                try {
-                    // 1. Load JSON
-                    const response = await fetch(scenarioUrl);
-                    if (!response.ok) throw new Error(`HTTP error loading JSON! status: ${response.status}`);
-                    scenarioData = await response.json();
-                    console.log("Scenario JSON loaded:", scenarioData);
-
-                    // 2. Load SVG
-                    if (!scenarioData.svgUrl) throw new Error("JSON missing 'svgUrl' property.");
-                    const svgResponse = await fetch(scenarioData.svgUrl);
-                    if (!svgResponse.ok) throw new Error(`HTTP error loading SVG! status: ${svgResponse.status}`);
-                    const svgText = await svgResponse.text();
-                    console.log("SVG loaded from:", scenarioData.svgUrl);
-
-                    // 3. Parse and Inject SVG
-                    const parser = new DOMParser();
-                    svgDocument = parser.parseFromString(svgText, 'image/svg+xml');
-                    const svgElement = svgDocument.querySelector('svg'); // Prefer selecting root SVG element
-
-                    // Check for parser errors more robustly
-                    const parserError = svgDocument.querySelector('parsererror');
-                    if (!svgElement || parserError) {
-                         const errorMsg = parserError?.textContent || "Could not find root <svg> element in the loaded file.";
-                         throw new Error(`SVG Parsing Error: ${errorMsg}`);
-                    }
-
-                    svgContainer.innerHTML = ''; // Clear 'Loading...'
-                    svgContainer.appendChild(svgElement); // Append the parsed SVG root
-                    console.log("SVG injected into container.");
-
-                    // Start the sequence
-                    nextStep();
-
-                } catch (error) {
-                    console.error("Failed to load scenario:", error);
-                    // Display error in the dialogue box for visibility
-                    dialogueTextContainer.textContent = `Error loading scenario: ${error.message}`;
-                    // Clear SVG container on load error
-                    svgContainer.innerHTML = '<p style="color: red;">Could not load SVG.</p>';
-                }
-            }
-
-            function displayStep(stepIndex) {
-                // Clear pending indicator timeout first
-                if (currentStepTimeoutId !== null) { clearTimeout(currentStepTimeoutId); currentStepTimeoutId = null; }
-                // Remove old indicator
-                const oldIndicator = document.getElementById('next-indicator');
-                if (oldIndicator) oldIndicator.remove();
-                // Reset container styles
-                mainDialogueContainer.classList.remove('fade-in-effect');
+                // Clear normal content areas on critical error
+                svgContainer.innerHTML = '';
+                dialogueTextContainer.innerHTML = '';
                 mainDialogueContainer.style.opacity = '1';
-
-                // Check bounds
-                if (!scenarioData || stepIndex < 0 || stepIndex >= scenarioData.steps.length) {
-                    console.log("End of scenario or invalid step index:", stepIndex);
-                    clearProgression();
-                    dialogueTextContainer.innerHTML = "End of scene."; // Use innerHTML for potential final indicator styling
-                    // Add final step indicator manually if needed, since schedule won't run
-                    const finalIndicator = document.createElement('span');
-                    finalIndicator.id = 'next-indicator'; // Use same ID for consistency
-                    finalIndicator.innerHTML = ' ▪'; // Final square
-                    finalIndicator.style.display = 'inline-block';
-                    dialogueTextContainer.appendChild(finalIndicator);
-                    return;
-                }
-
-                currentStepIndex = stepIndex;
-                const step = scenarioData.steps[currentStepIndex];
-                console.log("Displaying step:", currentStepIndex, step);
-
-                // 1. Apply Text Effect (passes step data for custom speed etc.)
-                applyTextEffect(step.dialogue || "", step.textEffect || "none", dialogueTextContainer, step);
-
-                // 2. Trigger NON-Synced Animations
-                triggerAnimation(step.animation, false); // false = not synced
-
-                // 3. Setup Progression
-                setupProgression(step.nextTrigger);
             }
 
-            function applyTextEffect(text, effectType, container, step) {
-                container.innerHTML = ''; // Clear previous
-                container.style.lineHeight = '1.5';
-                let effectDuration = 0;
-                const customSpeed = step.textEffectSpeed;
-
-                // --- START Synced Animation (if configured) ---
-                activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
-                const animationConfig = step.animation;
-                const animations = Array.isArray(animationConfig) ? animationConfig : [animationConfig];
-                animations.forEach(config => {
-                    if (config?.type === 'smil' && config.sync === 'dialogue' && config.targetId) {
-                        let animElement = svgContainer.querySelector(`#${config.targetId}`) || (svgDocument ? svgDocument.getElementById(config.targetId) : null);
-                        if (animElement?.beginElement) {
-                            animElement.beginElement();
-                            activeSyncedAnimationTargetId = config.targetId; activeSyncedAnimationElement = animElement;
-                            console.log(`Started synced SMIL animation: ${config.targetId}`);
-                        } else { console.warn(`Could not find/begin synced SMIL: ${config.targetId}`); }
-                    }
-                });
-                // --- END START Synced Animation ---
-
-                // --- Effect Implementations ---
-                let textIndex = 0; let spans = []; let charDelay = 50; let startDelay = 100;
-
-                if (effectType === 'blurReveal' || effectType === 'staticBlurReveal') {
-                    charDelay = typeof customSpeed === 'number' ? customSpeed : 50;
-                    const baseClass = (effectType === 'blurReveal') ? 'text-reveal' : 'text-static-blur';
-
-                    while(textIndex < text.length) {
-                        const span = document.createElement('span'); span.className = baseClass;
-                        if (text[textIndex] === '<') {
-                             let tag = ''; let j = textIndex; while (j < text.length && text[j] !== '>') { tag += text[j]; j++; } if (j < text.length) tag += text[j];
-                             const temp = document.createElement('div'); temp.innerHTML = tag; const node = temp.firstChild;
-                             if (node) { container.appendChild(node); textIndex = j + 1; continue; } else { span.textContent = text[textIndex]; }
-                        } else if (text[textIndex] === ' ') { span.className += ' space'; span.innerHTML = ' ';
-                        } else { span.textContent = text[textIndex]; }
-                        spans.push(span); container.appendChild(span); textIndex++;
-                    }
-                    let animationFrameId; const startAnimation = () => { spans.forEach((el, index) => { setTimeout(() => { el.classList.add('animated'); }, index * charDelay); }); };
-                    const timeoutId = setTimeout(() => { animationFrameId = requestAnimationFrame(startAnimation); }, startDelay);
-                    effectDuration = startDelay + spans.length * charDelay + 500; // Animation + CSS transition buffer
-
-                } else if (effectType === 'typewriter') {
-                    const typeSpeed = typeof customSpeed === 'number' ? customSpeed : 75;
-                    function typeChar() {
-                        if (charIndex < text.length) {
-                            if (text[charIndex] === '<') { let tag = ''; let j = charIndex; while (j < text.length && text[j] !== '>') { tag += text[j]; j++; } if (j < text.length) tag += text[j]; container.innerHTML += tag; charIndex = j + 1; }
-                             else { container.innerHTML += text[charIndex]; charIndex++; }
-                            currentStepTimeoutId = setTimeout(typeChar, typeSpeed);
-                        } else { scheduleIndicatorAndStop(effectDuration); } // Schedule when done
-                    }
-                    effectDuration = text.length * typeSpeed + 100;
-                    typeChar(); // Start
-                    return; // scheduleIndicatorAndStop called internally
-
-                } else if (effectType === 'fadeIn') {
-                    container.innerHTML = text; container.style.opacity = '0';
-                    requestAnimationFrame(() => { requestAnimationFrame(() => { container.style.opacity = '1'; }); });
-                    effectDuration = 500; // Match default CSS transition time
-
-                } else { // 'none' or fallback
-                    container.innerHTML = text; effectDuration = 50;
-                }
-
-                // Schedule indicator/stop for non-typewriter effects
-                scheduleIndicatorAndStop(effectDuration);
-            }
-
-            function scheduleIndicatorAndStop(duration) {
-                if (currentStepTimeoutId !== null) { clearTimeout(currentStepTimeoutId); }
-                currentStepTimeoutId = setTimeout(() => {
-                    // Stop synced animation
-                    if (activeSyncedAnimationElement?.endElement) {
-                        activeSyncedAnimationElement.endElement();
-                        console.log(`Ended synced SMIL animation (timer): ${activeSyncedAnimationTargetId}`);
-                        activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
-                    }
-                    // Add indicator
-                    if (!document.getElementById('next-indicator')) {
-                        const indicator = document.createElement('span'); indicator.id = 'next-indicator'; indicator.className = 'blinking';
-                        const currentStepConfig = scenarioData.steps[currentStepIndex];
-                        // Check if NEXT trigger is null OR if it's the last step index
-                        const isFinalStep = !currentStepConfig?.nextTrigger || currentStepIndex === scenarioData.steps.length - 1;
-                        indicator.innerHTML = isFinalStep ? ' ▪' : ' ▸';
-                        indicator.style.display = 'inline-block'; dialogueTextContainer.appendChild(indicator);
-                    }
-                    currentStepTimeoutId = null; // Clear ID after running
-                }, duration);
-            }
-
-            function triggerAnimation(animConfig, isSyncedDialogueAnim = false) {
-                if (!animConfig) return;
-                const animations = Array.isArray(animConfig) ? animConfig : [animConfig];
-
-                animations.forEach(config => {
-                    // Skip if sync status doesn't match context
-                    if (isSyncedDialogueAnim && config?.sync !== 'dialogue') return;
-                    if (!isSyncedDialogueAnim && config?.sync === 'dialogue') return;
-
-                    if (!config?.targetId || !config?.type) { console.warn("Invalid animation config:", config); return; }
-                    let shouldTrack = config.persistent !== true;
-
+            async function loadScenario() {
+                 svgContainer.innerHTML = ''; dialogueTextContainer.innerHTML = '';
+                 if (errorDisplay) errorDisplay.style.display = 'none';
+                if (!scenarioUrl) { displayError("Scenario URL not specified."); return; }
+                try {
+                    const response = await fetch(scenarioUrl);
+                    if (!response.ok) throw new Error(`HTTP ${response.status} loading JSON`);
+                    scenarioData = await response.json(); console.log("Scenario JSON loaded.");
+                    if (!scenarioData.svgUrl) throw new Error("JSON missing 'svgUrl'");
+                    const svgResponse = await fetch(scenarioData.svgUrl);
+                    if (!svgResponse.ok) throw new Error(`HTTP ${svgResponse.status} loading SVG`);
+                    const svgText = await svgResponse.text(); console.log("SVG loaded.");
+                    const parser = new DOMParser(); svgDocument = parser.parseFromString(svgText, 'image/svg+xml');
+                    const svgElement = svgDocument.querySelector('svg'); const parserError = svgDocument.querySelector('parsererror');
+                    if (!svgElement || parserError) { throw new Error(`SVG Parsing Error: ${parserError?.textContent || "Invalid SVG structure"}`); }
+                    svgContainer.appendChild(svgElement); console.log("SVG injected.");
+                    let startStep = 0;
                     try {
-                        // --- SMIL ---
-                        if (config.type === 'smil') {
-                            let animElement = svgContainer.querySelector(`#${config.targetId}`) || (svgDocument ? svgDocument.getElementById(config.targetId) : null);
-                            if (animElement) {
-                                if (config.action === 'begin' && animElement.beginElement) {
-                                    animElement.beginElement();
-                                    console.log(`Triggered SMIL animation: ${config.targetId}`);
-                                    if (shouldTrack) activeStepAnimations.push({ type: 'smil', reference: animElement, targetId: config.targetId });
-                                } // Add other actions like 'end' if needed
-                            } else { console.warn(`SMIL target not found: ${config.targetId}`); }
-                        // --- CSS Class ---
-                        } else if (config.type === 'css') {
-                            const targetElement = svgContainer.querySelector(`#${config.targetId}`);
-                            if (targetElement && config.action === 'addClass' && config.className) {
-                                targetElement.classList.add(config.className);
-                                console.log(`Added class ${config.className} to: #${config.targetId}`);
-                                if (shouldTrack) activeStepAnimations.push({ type: 'css', reference: { elementId: config.targetId, className: config.className }, targetId: config.targetId });
-                            } // Add 'removeClass' action if needed
-                        // --- GSAP (Placeholder - Code Removed) ---
-                        } else if (config.type === 'gsap') {
-                             console.warn(`GSAP animation type defined for ${config.targetId}, but GSAP code is not included in this script version.`);
-                             // If GSAP were included, the logic would go here.
+                        const savedState = localStorage.getItem(SAVE_KEY);
+                        if (savedState) {
+                            const parsedState = JSON.parse(savedState);
+                            if (typeof parsedState.currentStepIndex === 'number' && parsedState.currentStepIndex >= 0 && parsedState.currentStepIndex < scenarioData.steps.length) {
+                                startStep = parsedState.currentStepIndex; console.log(`Resuming at step index: ${startStep}`);
+                            } else { console.warn("Invalid saved step index, starting from 0."); localStorage.removeItem(SAVE_KEY); }
                         }
-                    } catch (error) { console.error(`Error triggering animation type ${config.type} on ${config.targetId}:`, error); }
-                });
+                    } catch (e) { console.error("Error loading saved state:", e); localStorage.removeItem(SAVE_KEY); }
+                    goToStep(startStep);
+                } catch (error) { displayError(`Failed to load scenario: ${error.message}`); }
             }
 
-            function clearProgression() {
-                if (progressionListener) {
-                    if (currentTriggerType === 'click') {
-                        mainDialogueContainer.removeEventListener('click', progressionListener);
-                        document.body.removeEventListener('click', progressionListener); // Fallback if needed
-                    } else if (currentTriggerType === 'keypress') { document.removeEventListener('keydown', progressionListener); }
-                    else if (currentTriggerType === 'timer') { clearTimeout(progressionListener); }
-                    progressionListener = null; currentTriggerType = null;
-                    console.log("Progression listeners/timers cleared.");
-                }
-            }
-
-            function setupProgression(triggerConfig) {
-                clearProgression();
-                if (!triggerConfig) { console.log("No next trigger defined."); return; }
-                currentTriggerType = triggerConfig.type;
-                if (triggerConfig.type === 'click') {
-                    progressionListener = (event) => { if (event.target.tagName === 'A') return; nextStep(); };
-                    mainDialogueContainer.addEventListener('click', progressionListener, { once: true }); // Listen on dialogue box
-                    console.log("Setup click progression listener on dialogue container.");
-                } else if (triggerConfig.type === 'keypress') {
-                    progressionListener = (event) => { if (event.key === (triggerConfig.key || ' ')) { nextStep(); } };
-                    document.addEventListener('keydown', progressionListener); // Listen globally
-                    console.log(`Setup keypress progression listener for key: ${triggerConfig.key || 'Space'}`);
-                } else if (triggerConfig.type === 'timer') {
-                    progressionListener = setTimeout(nextStep, triggerConfig.duration || 5000);
-                    console.log(`Setup timer progression for duration: ${triggerConfig.duration || 5000}ms`);
-                }
-            }
-
-            function nextStep() {
-                console.log("Attempting nextStep...");
-                // --- STOP & CLEAR Previous Step's Non-Persistent Animations ---
+            function cleanupPreviousStepState() {
+                console.log("Cleaning up previous step state...");
                 activeStepAnimations.forEach(anim => {
                     try {
                         console.log(`Stopping [${anim.type}] on ${anim.targetId}`);
@@ -420,32 +307,316 @@
                             case 'css':
                                 const element = svgContainer.querySelector(`#${anim.reference.elementId}`);
                                 if (element && anim.reference.className) element.classList.remove(anim.reference.className); break;
-                            // case 'gsap': if (anim.reference?.kill) anim.reference.kill(); break; // GSAP code removed
                         }
                     } catch (error) { console.error(`Error stopping animation type ${anim.type} on ${anim.targetId}:`, error); }
                 });
-                activeStepAnimations = []; // Clear the array
-                console.log("Cleared active step animations.");
-
-                // --- Stop Synced SMIL (if user advanced early) ---
+                activeStepAnimations = []; console.log("Cleared active step animations.");
                 if (activeSyncedAnimationElement?.endElement) {
-                    activeSyncedAnimationElement.endElement();
-                    console.log(`Force-stopped synced SMIL animation: ${activeSyncedAnimationTargetId}`);
+                    try { activeSyncedAnimationElement.endElement(); } catch(e) { console.error("Error ending synced anim:", e); }
+                    console.log(`Force-stopped synced SMIL: ${activeSyncedAnimationTargetId}`);
                 }
                 activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
-
-                // --- Clear Progression Listeners/Timers ---
+                if (currentStepTimeoutId !== null) { clearTimeout(currentStepTimeoutId); currentStepTimeoutId = null; }
                 clearProgression();
-
-                // --- Proceed to display the next step ---
-                displayStep(currentStepIndex + 1);
+                clearChoices();
             }
 
-            // --- Initiate Loading ---
-            loadScenario();
-        });
+            function displayStep(stepIndex) {
+                cleanupPreviousStepState();
+                const oldIndicator = document.getElementById('next-indicator'); if (oldIndicator) oldIndicator.remove();
+                mainDialogueContainer.classList.remove('fade-in-effect'); mainDialogueContainer.style.opacity = '1';
+
+                if (!scenarioData || stepIndex < 0 || stepIndex >= scenarioData.steps.length) {
+                    console.log("End of scenario or invalid step index:", stepIndex);
+                    dialogueTextContainer.innerHTML = "End of scene.";
+                    const finalIndicator = document.createElement('span'); finalIndicator.id = 'next-indicator';
+                    finalIndicator.innerHTML = ' ▪'; // Use square symbol directly
+                    finalIndicator.style.display = 'inline-block'; dialogueTextContainer.appendChild(finalIndicator);
+                    return;
+                }
+                currentStepIndex = stepIndex; const step = scenarioData.steps[currentStepIndex];
+                console.log("Displaying step:", currentStepIndex, step);
+                try { localStorage.setItem(SAVE_KEY, JSON.stringify({ currentStepIndex: currentStepIndex })); }
+                catch (error) { console.error("Failed to save state to localStorage:", error); }
+                applyTextEffect(step.dialogue || "", step.textEffect || "none", dialogueTextContainer, step);
+                triggerAnimation(step.animation, false);
+                if (step.choices && Array.isArray(step.choices)) { console.log("Step has choices (will render after text effect)."); }
+                else if (step.nextTrigger) { console.log("Setting up progression trigger(s)."); setupProgression(step.nextTrigger); }
+                 else { console.log("Step has no choices or nextTrigger (likely end)."); }
+            }
+
+            function applyTextEffect(text, effectType, container, step) {
+                container.innerHTML = ''; container.style.lineHeight = '1.5'; let effectDuration = 0;
+                const customSpeed = step.textEffectSpeed; activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
+                const animationConfig = step.animation; const animations = Array.isArray(animationConfig) ? animationConfig : [animationConfig];
+                animations.forEach(config => {
+                    if (config?.type === 'smil' && config.sync === 'dialogue' && config.targetId) {
+                        let animElement = svgContainer.querySelector(`#${config.targetId}`) || (svgDocument ? svgDocument.getElementById(config.targetId) : null);
+                        if (animElement?.beginElement) { animElement.beginElement(); activeSyncedAnimationTargetId = config.targetId; activeSyncedAnimationElement = animElement; console.log(`Started synced SMIL: ${config.targetId}`); }
+                        else { console.warn(`Could not find/begin synced SMIL: ${config.targetId}`); }
+                    }
+                });
+                let textIndex = 0; let spans = []; let charDelay = 50; let startDelay = 100;
+                if (effectType === 'blurReveal' || effectType === 'staticBlurReveal') {
+                    charDelay = typeof customSpeed === 'number' ? customSpeed : 50; const baseClass = (effectType === 'blurReveal') ? 'text-reveal' : 'text-static-blur';
+                    textIndex = 0; spans = [];
+                    while(textIndex < text.length) {
+                        const span = document.createElement('span'); span.className = baseClass;
+                        if (text[textIndex] === '<') { let tag = ''; let j = textIndex; while (j < text.length && text[j] !== '>') { tag += text[j]; j++; } if (j < text.length) tag += text[j]; const temp = document.createElement('div'); temp.innerHTML = tag; const node = temp.firstChild; if (node) { container.appendChild(node); textIndex = j + 1; continue; } else { span.textContent = text[textIndex]; } }
+                         else if (text[textIndex] === ' ') { span.className += ' space'; span.innerHTML = ' '; } else { span.textContent = text[textIndex]; }
+                        spans.push(span); container.appendChild(span); textIndex++;
+                    }
+                    let animationFrameId; const startAnimation = () => { spans.forEach((el, index) => { setTimeout(() => { el.classList.add('animated'); }, index * charDelay); }); };
+                    const timeoutId = setTimeout(() => { animationFrameId = requestAnimationFrame(startAnimation); }, startDelay);
+                    effectDuration = startDelay + spans.length * charDelay + 500;
+                } else if (effectType === 'typewriter') {
+                    const typeSpeed = typeof customSpeed === 'number' ? customSpeed : 75; let charIndex = 0;
+                    function typeChar() {
+                        if (charIndex < text.length) {
+                            if (text[charIndex] === '<') { let tag = ''; let j = charIndex; while (j < text.length && text[j] !== '>') { tag += text[j]; j++; } if (j < text.length) tag += text[j]; container.innerHTML += tag; charIndex = j + 1; } else { container.innerHTML += text[charIndex]; charIndex++; }
+                            currentStepTimeoutId = setTimeout(typeChar, typeSpeed);
+                        } else { scheduleIndicatorOrChoices(effectDuration); }
+                    }
+                    effectDuration = text.length * typeSpeed + 100; typeChar(); return;
+                } else if (effectType === 'fadeIn') {
+                    container.innerHTML = text; container.style.opacity = '0'; requestAnimationFrame(() => { requestAnimationFrame(() => { container.style.opacity = '1'; }); }); effectDuration = 500;
+                } else { container.innerHTML = text; effectDuration = 50; }
+                scheduleIndicatorOrChoices(effectDuration);
+            }
+
+            // **** Corrected scheduleIndicatorOrChoices (Removed duplicate code) ****
+            function scheduleIndicatorOrChoices(duration) {
+                if (currentStepTimeoutId !== null) { clearTimeout(currentStepTimeoutId); }
+                currentStepTimeoutId = setTimeout(() => {
+                    // Stop synced animation first
+                    if (activeSyncedAnimationElement?.endElement) {
+                        try { activeSyncedAnimationElement.endElement(); } catch(e) { console.error("Error ending synced anim:", e); }
+                        console.log(`Ended synced SMIL (timer): ${activeSyncedAnimationTargetId}`);
+                        activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
+                    }
+
+                    const currentStepConfig = scenarioData.steps[currentStepIndex];
+                    // Handle cases where currentStepConfig might be undefined (end of scenario edge case)
+                    const hasChoices = currentStepConfig?.choices && Array.isArray(currentStepConfig.choices);
+                    const hasTrigger = !!currentStepConfig?.nextTrigger;
+
+                    // --- Add Indicator ---
+                    const oldIndicator = document.getElementById('next-indicator');
+                    if (oldIndicator) oldIndicator.remove();
+
+                    if (!document.getElementById('next-indicator')) {
+                        const indicator = document.createElement('span');
+                        indicator.id = 'next-indicator';
+                        indicator.className = 'blinking';
+
+                        if (hasChoices) {
+                             indicator.innerHTML = ' ▾'; // Down arrow for choices
+                             console.log("Adding choices indicator ▼");
+                        } else {
+                            // Determine if truly the final state (no trigger AND no choices)
+                            const isTrulyFinal = !hasTrigger && !hasChoices;
+                             indicator.innerHTML = isTrulyFinal ? ' ▪' : ' ▸'; // Square or Triangle
+                             console.log(`Adding regular/final indicator: ${isTrulyFinal ? '■' : '▶'}`);
+                        }
+                        indicator.style.display = 'inline-block';
+                        dialogueTextContainer.appendChild(indicator);
+                    }
+                    // --- End Add Indicator ---
+
+                    // Render Choices and setup their specific listeners (if they exist)
+                    if (hasChoices) {
+                         const choiceElements = renderChoices(currentStepConfig.choices);
+                         setupChoiceInputHandlers(choiceElements, currentStepConfig.choices);
+                    }
+
+                    currentStepTimeoutId = null; // Clear ID after execution
+                }, duration);
+            }
+
+            // (triggerAnimation remains the same)
+             function triggerAnimation(animConfig, isSyncedDialogueAnim = false) {
+                if (!animConfig) return;
+                const animations = Array.isArray(animConfig) ? animConfig : [animConfig];
+                animations.forEach(config => {
+                    if (isSyncedDialogueAnim && config?.sync !== 'dialogue') return;
+                    if (!isSyncedDialogueAnim && config?.sync === 'dialogue') return;
+                    if (!config?.targetId || !config?.type) { console.warn("Invalid anim config:", config); return; }
+                    let shouldTrack = config.persistent !== true;
+                    try {
+                        if (config.type === 'smil') {
+                            let animElement = svgContainer.querySelector(`#${config.targetId}`) || (svgDocument ? svgDocument.getElementById(config.targetId) : null);
+                            if (animElement?.beginElement) {
+                                animElement.beginElement(); console.log(`Triggered SMIL: ${config.targetId}`);
+                                if (shouldTrack) activeStepAnimations.push({ type: 'smil', reference: animElement, targetId: config.targetId });
+                            } else { console.warn(`SMIL target not found: ${config.targetId}`); }
+                        } else if (config.type === 'css') {
+                            const targetElement = svgContainer.querySelector(`#${config.targetId}`);
+                            if (targetElement && config.action === 'addClass' && config.className) {
+                                targetElement.classList.add(config.className); console.log(`Added class ${config.className} to: #${config.targetId}`);
+                                if (shouldTrack) activeStepAnimations.push({ type: 'css', reference: { elementId: config.targetId, className: config.className }, targetId: config.targetId });
+                            }
+                        }
+                    } catch (error) { console.error(`Error triggering anim ${config.type} on ${config.targetId}:`, error); }
+                });
+            }
+
+            // (clearProgression remains the same)
+            function clearProgression() {
+                console.log("Clearing progression listeners. Count:", activeListeners.length);
+                activeListeners.forEach(listenerInfo => {
+                    try {
+                        if (listenerInfo.type === 'click' && listenerInfo.element && listenerInfo.handler) {
+                            listenerInfo.element.removeEventListener('click', listenerInfo.handler);
+                        } else if (listenerInfo.type === 'keypress' && listenerInfo.handler) {
+                            document.removeEventListener('keydown', listenerInfo.handler);
+                        } else if (listenerInfo.type === 'timer' && listenerInfo.id) {
+                            clearTimeout(listenerInfo.id);
+                        }
+                    } catch (e) { console.error("Error removing listener:", e); }
+                });
+                activeListeners = [];
+            }
+
+            // (setupProgression remains the same - using nextStepId)
+             function setupProgression(triggerConfig) {
+                if (!triggerConfig) { console.log("No trigger config provided for setup."); return; }
+                const triggers = Array.isArray(triggerConfig) ? triggerConfig : [triggerConfig];
+                let progressionTriggered = false;
+                triggers.forEach(trigger => {
+                    const targetStepId = trigger.nextStepId;
+                    if (!targetStepId) { console.error("Trigger object missing 'nextStepId':", trigger); return; }
+                    const listenerCallback = () => {
+                        if (progressionTriggered) return; progressionTriggered = true;
+                        console.log(`Progression triggered by: ${trigger.type}, moving to step ID: ${targetStepId}`);
+                        goToStep(targetStepId);
+                    };
+                    if (trigger.type === 'click') {
+                        const clickListener = (event) => { if (event.target.tagName === 'A') return; listenerCallback(); };
+                        mainDialogueContainer.addEventListener('click', clickListener, { once: true });
+                        activeListeners.push({ type: 'click', handler: clickListener, element: mainDialogueContainer });
+                        console.log(`Setup click progression to stepId: ${targetStepId}`);
+                    } else if (trigger.type === 'keypress') {
+                         const keyListener = (event) => { if (event.key === (trigger.key || ' ')) { listenerCallback(); } };
+                         document.addEventListener('keydown', keyListener);
+                         activeListeners.push({ type: 'keypress', handler: keyListener });
+                         console.log(`Setup keypress progression for key '${trigger.key || 'Space'}' to stepId: ${targetStepId}`);
+                    } else if (trigger.type === 'timer') {
+                         const timerId = setTimeout(listenerCallback, trigger.duration || 5000);
+                         activeListeners.push({ type: 'timer', id: timerId });
+                         console.log(`Setup timer progression for ${trigger.duration || 5000}ms to stepId: ${targetStepId}`);
+                    }
+                });
+            }
+
+            // **** Corrected renderChoices (Removed duplicate code, ensure correct logic) ****
+            function renderChoices(choices) {
+                 clearChoices(); // Remove previous UI
+                 choicesContainer = document.createElement('div');
+                 choicesContainer.id = 'choices-container';
+                 const ul = document.createElement('ul');
+                 const choiceElements = []; // Store for animation
+
+                 choices.forEach((choice, index) => {
+                     const li = document.createElement('li');
+                     const choiceNumber = index + 1;
+                     li.innerHTML = `${choiceNumber}. ${choice.text}`; // Number prefix + text (allows HTML)
+                     li.dataset.nextStepId = choice.nextStepId;
+                     li.dataset.choiceIndex = index; // Store index for key lookup
+                     li.classList.add('choice-item'); // Add base class for styling/animation start state
+                     // Event listener is added in setupChoiceInputHandlers
+                     ul.appendChild(li);
+                     choiceElements.push(li);
+                 });
+
+                 choicesContainer.appendChild(ul);
+                 mainDialogueContainer.appendChild(choicesContainer); // Append below text
+
+                 // Staggered Animation for Choices
+                 const choiceStaggerDelay = 80;
+                 requestAnimationFrame(() => {
+                     choiceElements.forEach((el, index) => {
+                         setTimeout(() => {
+                             el.classList.add('animated'); // Add class to trigger CSS transition
+                         }, index * choiceStaggerDelay);
+                     });
+                 });
+                 return choiceElements; // Return elements for listener setup
+            }
+
+            // (clearChoices remains the same)
+            function clearChoices() { if (choicesContainer) { choicesContainer.remove(); choicesContainer = null; } }
+
+            // (handleChoiceClick remains the same)
+            function handleChoiceClick(event) {
+                 const targetLi = event.currentTarget;
+                 const nextStepId = targetLi.dataset.nextStepId;
+                 console.log(`Choice clicked: ${targetLi.textContent}, Next Step ID: ${nextStepId}`);
+                 if (nextStepId) { goToStep(nextStepId); }
+                 else { console.error("Choice is missing a nextStepId!"); }
+            }
+
+            // (New setupChoiceInputHandlers remains the same)
+            function setupChoiceInputHandlers(choiceElements, choicesData) {
+                let progressionTriggered = false;
+                const choiceSelected = (choiceIndex) => {
+                     if (progressionTriggered) return; progressionTriggered = true;
+                     if (choiceIndex >= 0 && choiceIndex < choicesData.length) {
+                         const nextStepId = choicesData[choiceIndex].nextStepId;
+                         console.log(`Choice ${choiceIndex + 1} selected, moving to step ID: ${nextStepId}`);
+                         goToStep(nextStepId);
+                     } else { console.error(`Invalid choice index selected: ${choiceIndex}`); }
+                };
+                choiceElements.forEach((liElement) => {
+                    const clickHandler = (event) => { const index = parseInt(event.currentTarget.dataset.choiceIndex, 10); choiceSelected(index); };
+                    liElement.addEventListener('click', clickHandler);
+                    activeListeners.push({ type: 'click', handler: clickHandler, element: liElement });
+                }); console.log("Setup click listeners for choices.");
+                const keydownHandler = (event) => {
+                    const keyNum = parseInt(event.key, 10);
+                    if (!isNaN(keyNum) && keyNum > 0 && keyNum <= choicesData.length) {
+                        event.preventDefault(); choiceSelected(keyNum - 1);
+                    }
+                };
+                document.addEventListener('keydown', keydownHandler);
+                activeListeners.push({ type: 'keypress', handler: keydownHandler });
+                console.log(`Setup keypress listener for choices (1-${choicesData.length}).`);
+            }
+
+            // (goToStep remains the same - with safer logging)
+            function goToStep(stepIdOrIndex) {
+                console.log(`Attempting goToStep with input: ${stepIdOrIndex} (type: ${typeof stepIdOrIndex})`);
+                let targetIndex = -1;
+                if (typeof stepIdOrIndex === 'string') {
+                    console.log(`Searching for stepId: "${stepIdOrIndex}" in ${scenarioData.steps.length} steps.`);
+                    targetIndex = scenarioData.steps.findIndex(step => step.stepId === stepIdOrIndex);
+                    console.log(`findIndex result for "${stepIdOrIndex}": ${targetIndex}`);
+                } else if (typeof stepIdOrIndex === 'number') {
+                    targetIndex = stepIdOrIndex; console.log(`Using direct index: ${targetIndex}`);
+                }
+                if (targetIndex !== -1 && targetIndex < scenarioData.steps.length) {
+                    console.log(`Proceeding to displayStep with index: ${targetIndex}`);
+                    displayStep(targetIndex);
+                } else {
+                    console.error(`Could not find valid step matching ID or index:`, stepIdOrIndex);
+                    displayError(`Error: Invalid step transition target: ${JSON.stringify(stepIdOrIndex)}`);
+                    clearProgression();
+                }
+            }
+
+            // (setupResetButton remains the same)
+            function setupResetButton() {
+                if (resetButton) {
+                    resetButton.addEventListener('click', () => {
+                        console.log("Resetting progress...");
+                        localStorage.removeItem(SAVE_KEY);
+                        alert("Progress reset. Reloading page.");
+                        window.location.reload();
+                    });
+                }
+            }
+
+        }); // End DOMContentLoaded
     </script>
-    
 
 </body>
 </html>
