@@ -31,12 +31,12 @@ This project provides a lightweight, browser-based engine for creating interacti
 
 ## File Structure
 
-
+```
 your-project-folder/s
 ├── index.html # The main HTML file containing the runtime engine (CSS+JS)
 ├── your-scenario.json # Defines the dialogue sequence, animations, and triggers
 └── your-image.svg # Your SVG graphic, potentially with embedded SMIL animations
-
+```
       
 ## Setup
 
@@ -104,13 +104,6 @@ your-project-folder/s
           "className": "your-css-animation-class", // CSS class defined in index.html <style>
           "persistent": false // Optional: Set true to prevent class removal on nextTrigger
         }
-        // {
-        //   // --- GSAP Placeholder (Requires adding GSAP library and JS code) ---
-        //   "type": "gsap",
-        //   "targetId": "svg-element-id",
-        //   "action": "to", // "from", "fromTo"
-        //   "vars": { /* GSAP variables like duration, opacity, scale, morphSVG etc. */ }
-        // }
       ],
       "nextTrigger": { // Defines how to move to the next step
         "type": "click", // "click", "keypress", "timer", or null for the last step
