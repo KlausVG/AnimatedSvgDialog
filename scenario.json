@@ -1,0 +1,72 @@
+{
+  "svgUrl": "./oeil.svg",
+  "steps": [
+    {
+      "stepId": "intro-speak",
+      "dialogue": "Welcome... I see you have arrived.",
+      "speaker": "Mystic Eye",
+      "textEffect": "typewriter",
+      "animation": {
+        "type": "smil",
+        "targetId": "speak",
+        "action": "begin"
+        
+      },
+      "nextTrigger": {
+        "type": "click"
+      }
+    },
+    {
+      "stepId": "pupil-focus",
+      "dialogue": "Look closer... what do you perceive?",
+      "speaker": "Mystic Eye",
+      "textEffect": "blurReveal",
+      "animation": {
+        "type": "css",
+        "targetId": "pupille", 
+        "action": "addClass",
+        "className": "pulse-glow"
+       
+      },
+      "nextTrigger": {
+        "type": "keypress",
+        "key": " "
+      }
+    },
+    {
+      "stepId": "wait-short",
+      "dialogue": "Patience...",
+      "speaker": "Mystic Eye",
+      "textEffect": "fadeIn",
+      "animation": null, 
+      "nextTrigger": {
+        "type": "timer",
+        "duration": 4000 
+      }
+    },
+    {
+      "stepId": "loop-persist",
+      "dialogue": "Observe the flow. It continues.",
+      "speaker": "Mystic Eye",
+      "textEffect": "typewriter",
+      "animation": {
+        "type": "smil",
+        "targetId": "speak", 
+        "action": "begin",
+        "persistent": true 
+      },
+      "nextTrigger": {
+        "type": "click"
+       
+      }
+    },
+    {
+      "stepId": "final",
+      "dialogue": "The cycle repeats.",
+      "speaker": "Mystic Eye",
+      "textEffect": "blurReveal",
+      "animation": null,
+      "nextTrigger": null 
+    }
+  ]
+}

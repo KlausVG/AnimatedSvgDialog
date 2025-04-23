@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Dialogue Scene</title>
+
+    <!-- Optional: Include GSAP if you use "type": "gsap" in your JSON -->
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script> -->
+
+    <style>
+     
+        /* --- Basic Layout & Reset --- */
+        body {
+            font-family: sans-serif;
+            background-color: black;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .scene-container {
+           
+            padding: 20px;
+           
+            max-width: 800px; /* Adjust as needed */
+            width: 90%;
+            display: flex;
+            flex-direction: column; /* Stack SVG above dialogue */
+            gap: 15px;
+        }
+
+        /* --- SVG Container --- */
+        #svg-container {
+           
+           
+            min-height: 200px; /* Adjust as needed */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Ensure SVG scales nicely */
+        #svg-container svg {
+            max-width: 100%;
+            max-height: 400px; /* Limit SVG height if needed */
+            height: auto;
+            display: block;
+            /* Set default color for SVG paths if needed */
+            color: white; /* Uses CSS currentColor */
+        }
+
+         /* Example highlight for selected elements (if you add that feature) */
+        .selected-svg-element {
+             outline: 2px solid blue;
+        }
+
+        /* --- Dialogue Container --- */
+        #dialogue-container {
+           text-align: center;
+            padding: 15px 20px;
+            border-radius: 5px;
+            min-height: 80px; /* Ensure space for text */
+            line-height: 1.5;
+            color:white;
+            font-size: 1.5em; /* Adjust as needed */
+            position: relative; /* For potential absolute elements inside */
+            transition: opacity 0.5s ease-in-out; /* For fadeIn effect */
+        }
+
+        /* --- Styles for blurReveal Effect --- */
+        .text-reveal {
+            display: inline-block;
+            opacity: 0;
+            filter: blur(8px);
+            transform: translateY(15px);
+            transition: opacity 0.5s ease-out, filter 0.5s ease-out, transform 0.5s ease-out;
+            will-change: opacity, filter, transform;
+        }
+
+        .text-reveal.space {
+            width: 0.3em;
+            opacity: 0;
+            filter: blur(8px);
+            transform: translateY(15px);
+            transition: opacity 0.5s ease-out, filter 0.5s ease-out, transform 0.5s ease-out;
+            will-change: opacity, filter, transform;
+        }
+
+        .text-reveal.animated {
+            opacity: 1;
+            filter: blur(0);
+            transform: translateY(0);
+        }
+
+        /* --- Styles for Blinking Indicator --- */
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.2; }
+        }
+
+        #next-indicator {
+            display: inline-block;
+            margin-left: 8px;
+            color: white;
+            cursor: pointer; /* Indicate it might be clickable */
+        }
+
+        #next-indicator.blinking {
+            animation: blink 1.5s infinite;
+        }
+
+        /* Example pulsing glow class for CSS animation */
+        @keyframes pulse-glow {
+            0% { filter: drop-shadow(0 0 2px rgba(0, 150, 255, 0.7)); }
+            50% { filter: drop-shadow(0 0 10px rgba(0, 150, 255, 1)); }
+            100% { filter: drop-shadow(0 0 2px rgba(0, 150, 255, 0.7)); }
+        }
+
+        .pulse-glow {
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+    
+
+    </style>
+</head>
+<!-- **** IMPORTANT: Set the correct path to YOUR scenario JSON file here **** -->
+<body data-scenario-url="./scenario.json">
+
+    <div class="scene-container">
+        <div id="svg-container">Loading SVG...</div>
+        <div id="dialogue-container">
+            <p id="dialogue-text-container">Loading scene...</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM References ---
+            const svgContainer = document.getElementById('svg-container');
+            const dialogueTextContainer = document.getElementById('dialogue-text-container'); // Inner <p> or div for text
+            const mainDialogueContainer = document.getElementById('dialogue-container'); // Outer box
+            const scenarioUrl = document.body.dataset.scenarioUrl;
+
+            // --- State Variables ---
+            let scenarioData = null;
+            let currentStepIndex = -1;
+            let svgDocument = null; // Holds the parsed SVG DOM result
+            let activeStepAnimations = []; // Track non-persistent animations { type, reference, targetId }
+            let activeSyncedAnimationTargetId = null; // Track SMIL anim synced with dialogue
+            let activeSyncedAnimationElement = null; // Reference to the synced SMIL element
+            let progressionListener = null; // Holds active listener/timer
+            let currentTriggerType = null; // Type of active listener/timer
+            let currentStepTimeoutId = null; // Timeout ID for indicator/sync stop
+
+            // --- Core Functions ---
+
+            async function loadScenario() {
+                if (!scenarioUrl) {
+                    console.error("Scenario URL not specified in body data-scenario-url attribute.");
+                    dialogueTextContainer.textContent = "Error: Scenario URL not specified."; return;
+                }
+                try {
+                    // 1. Load JSON
+                    const response = await fetch(scenarioUrl);
+                    if (!response.ok) throw new Error(`HTTP error loading JSON! status: ${response.status}`);
+                    scenarioData = await response.json();
+                    console.log("Scenario JSON loaded:", scenarioData);
+
+                    // 2. Load SVG
+                    if (!scenarioData.svgUrl) throw new Error("JSON missing 'svgUrl' property.");
+                    const svgResponse = await fetch(scenarioData.svgUrl);
+                    if (!svgResponse.ok) throw new Error(`HTTP error loading SVG! status: ${svgResponse.status}`);
+                    const svgText = await svgResponse.text();
+                    console.log("SVG loaded from:", scenarioData.svgUrl);
+
+                    // 3. Parse and Inject SVG
+                    const parser = new DOMParser();
+                    svgDocument = parser.parseFromString(svgText, 'image/svg+xml');
+                    const svgElement = svgDocument.querySelector('svg'); // Prefer selecting root SVG element
+
+                    // Check for parser errors more robustly
+                    const parserError = svgDocument.querySelector('parsererror');
+                    if (!svgElement || parserError) {
+                         const errorMsg = parserError?.textContent || "Could not find root <svg> element in the loaded file.";
+                         throw new Error(`SVG Parsing Error: ${errorMsg}`);
+                    }
+
+                    svgContainer.innerHTML = ''; // Clear 'Loading...'
+                    svgContainer.appendChild(svgElement); // Append the parsed SVG root
+                    console.log("SVG injected into container.");
+
+                    // Start the sequence
+                    nextStep();
+
+                } catch (error) {
+                    console.error("Failed to load scenario:", error);
+                    // Display error in the dialogue box for visibility
+                    dialogueTextContainer.textContent = `Error loading scenario: ${error.message}`;
+                    // Clear SVG container on load error
+                    svgContainer.innerHTML = '<p style="color: red;">Could not load SVG.</p>';
+                }
+            }
+
+            function displayStep(stepIndex) {
+                // Clear pending indicator timeout first
+                if (currentStepTimeoutId !== null) { clearTimeout(currentStepTimeoutId); currentStepTimeoutId = null; }
+                // Remove old indicator
+                const oldIndicator = document.getElementById('next-indicator');
+                if (oldIndicator) oldIndicator.remove();
+                // Reset container styles
+                mainDialogueContainer.classList.remove('fade-in-effect');
+                mainDialogueContainer.style.opacity = '1';
+
+                // Check bounds
+                if (!scenarioData || stepIndex < 0 || stepIndex >= scenarioData.steps.length) {
+                    console.log("End of scenario or invalid step index:", stepIndex);
+                    clearProgression();
+                    dialogueTextContainer.innerHTML = "End of scene."; // Use innerHTML for potential final indicator styling
+                    // Add final step indicator manually if needed, since schedule won't run
+                    const finalIndicator = document.createElement('span');
+                    finalIndicator.id = 'next-indicator'; // Use same ID for consistency
+                    finalIndicator.innerHTML = ' ▪'; // Final square
+                    finalIndicator.style.display = 'inline-block';
+                    dialogueTextContainer.appendChild(finalIndicator);
+                    return;
+                }
+
+                currentStepIndex = stepIndex;
+                const step = scenarioData.steps[currentStepIndex];
+                console.log("Displaying step:", currentStepIndex, step);
+
+                // 1. Apply Text Effect (passes step data for custom speed etc.)
+                applyTextEffect(step.dialogue || "", step.textEffect || "none", dialogueTextContainer, step);
+
+                // 2. Trigger NON-Synced Animations
+                triggerAnimation(step.animation, false); // false = not synced
+
+                // 3. Setup Progression
+                setupProgression(step.nextTrigger);
+            }
+
+            function applyTextEffect(text, effectType, container, step) {
+                container.innerHTML = ''; // Clear previous
+                container.style.lineHeight = '1.5';
+                let effectDuration = 0;
+                const customSpeed = step.textEffectSpeed;
+
+                // --- START Synced Animation (if configured) ---
+                activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
+                const animationConfig = step.animation;
+                const animations = Array.isArray(animationConfig) ? animationConfig : [animationConfig];
+                animations.forEach(config => {
+                    if (config?.type === 'smil' && config.sync === 'dialogue' && config.targetId) {
+                        let animElement = svgContainer.querySelector(`#${config.targetId}`) || (svgDocument ? svgDocument.getElementById(config.targetId) : null);
+                        if (animElement?.beginElement) {
+                            animElement.beginElement();
+                            activeSyncedAnimationTargetId = config.targetId; activeSyncedAnimationElement = animElement;
+                            console.log(`Started synced SMIL animation: ${config.targetId}`);
+                        } else { console.warn(`Could not find/begin synced SMIL: ${config.targetId}`); }
+                    }
+                });
+                // --- END START Synced Animation ---
+
+                // --- Effect Implementations ---
+                let textIndex = 0; let spans = []; let charDelay = 50; let startDelay = 100;
+
+                if (effectType === 'blurReveal' || effectType === 'staticBlurReveal') {
+                    charDelay = typeof customSpeed === 'number' ? customSpeed : 50;
+                    const baseClass = (effectType === 'blurReveal') ? 'text-reveal' : 'text-static-blur';
+
+                    while(textIndex < text.length) {
+                        const span = document.createElement('span'); span.className = baseClass;
+                        if (text[textIndex] === '<') {
+                             let tag = ''; let j = textIndex; while (j < text.length && text[j] !== '>') { tag += text[j]; j++; } if (j < text.length) tag += text[j];
+                             const temp = document.createElement('div'); temp.innerHTML = tag; const node = temp.firstChild;
+                             if (node) { container.appendChild(node); textIndex = j + 1; continue; } else { span.textContent = text[textIndex]; }
+                        } else if (text[textIndex] === ' ') { span.className += ' space'; span.innerHTML = ' ';
+                        } else { span.textContent = text[textIndex]; }
+                        spans.push(span); container.appendChild(span); textIndex++;
+                    }
+                    let animationFrameId; const startAnimation = () => { spans.forEach((el, index) => { setTimeout(() => { el.classList.add('animated'); }, index * charDelay); }); };
+                    const timeoutId = setTimeout(() => { animationFrameId = requestAnimationFrame(startAnimation); }, startDelay);
+                    effectDuration = startDelay + spans.length * charDelay + 500; // Animation + CSS transition buffer
+
+                } else if (effectType === 'typewriter') {
+                    const typeSpeed = typeof customSpeed === 'number' ? customSpeed : 75;
+                    function typeChar() {
+                        if (charIndex < text.length) {
+                            if (text[charIndex] === '<') { let tag = ''; let j = charIndex; while (j < text.length && text[j] !== '>') { tag += text[j]; j++; } if (j < text.length) tag += text[j]; container.innerHTML += tag; charIndex = j + 1; }
+                             else { container.innerHTML += text[charIndex]; charIndex++; }
+                            currentStepTimeoutId = setTimeout(typeChar, typeSpeed);
+                        } else { scheduleIndicatorAndStop(effectDuration); } // Schedule when done
+                    }
+                    effectDuration = text.length * typeSpeed + 100;
+                    typeChar(); // Start
+                    return; // scheduleIndicatorAndStop called internally
+
+                } else if (effectType === 'fadeIn') {
+                    container.innerHTML = text; container.style.opacity = '0';
+                    requestAnimationFrame(() => { requestAnimationFrame(() => { container.style.opacity = '1'; }); });
+                    effectDuration = 500; // Match default CSS transition time
+
+                } else { // 'none' or fallback
+                    container.innerHTML = text; effectDuration = 50;
+                }
+
+                // Schedule indicator/stop for non-typewriter effects
+                scheduleIndicatorAndStop(effectDuration);
+            }
+
+            function scheduleIndicatorAndStop(duration) {
+                if (currentStepTimeoutId !== null) { clearTimeout(currentStepTimeoutId); }
+                currentStepTimeoutId = setTimeout(() => {
+                    // Stop synced animation
+                    if (activeSyncedAnimationElement?.endElement) {
+                        activeSyncedAnimationElement.endElement();
+                        console.log(`Ended synced SMIL animation (timer): ${activeSyncedAnimationTargetId}`);
+                        activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
+                    }
+                    // Add indicator
+                    if (!document.getElementById('next-indicator')) {
+                        const indicator = document.createElement('span'); indicator.id = 'next-indicator'; indicator.className = 'blinking';
+                        const currentStepConfig = scenarioData.steps[currentStepIndex];
+                        // Check if NEXT trigger is null OR if it's the last step index
+                        const isFinalStep = !currentStepConfig?.nextTrigger || currentStepIndex === scenarioData.steps.length - 1;
+                        indicator.innerHTML = isFinalStep ? ' ▪' : ' ▸';
+                        indicator.style.display = 'inline-block'; dialogueTextContainer.appendChild(indicator);
+                    }
+                    currentStepTimeoutId = null; // Clear ID after running
+                }, duration);
+            }
+
+            function triggerAnimation(animConfig, isSyncedDialogueAnim = false) {
+                if (!animConfig) return;
+                const animations = Array.isArray(animConfig) ? animConfig : [animConfig];
+
+                animations.forEach(config => {
+                    // Skip if sync status doesn't match context
+                    if (isSyncedDialogueAnim && config?.sync !== 'dialogue') return;
+                    if (!isSyncedDialogueAnim && config?.sync === 'dialogue') return;
+
+                    if (!config?.targetId || !config?.type) { console.warn("Invalid animation config:", config); return; }
+                    let shouldTrack = config.persistent !== true;
+
+                    try {
+                        // --- SMIL ---
+                        if (config.type === 'smil') {
+                            let animElement = svgContainer.querySelector(`#${config.targetId}`) || (svgDocument ? svgDocument.getElementById(config.targetId) : null);
+                            if (animElement) {
+                                if (config.action === 'begin' && animElement.beginElement) {
+                                    animElement.beginElement();
+                                    console.log(`Triggered SMIL animation: ${config.targetId}`);
+                                    if (shouldTrack) activeStepAnimations.push({ type: 'smil', reference: animElement, targetId: config.targetId });
+                                } // Add other actions like 'end' if needed
+                            } else { console.warn(`SMIL target not found: ${config.targetId}`); }
+                        // --- CSS Class ---
+                        } else if (config.type === 'css') {
+                            const targetElement = svgContainer.querySelector(`#${config.targetId}`);
+                            if (targetElement && config.action === 'addClass' && config.className) {
+                                targetElement.classList.add(config.className);
+                                console.log(`Added class ${config.className} to: #${config.targetId}`);
+                                if (shouldTrack) activeStepAnimations.push({ type: 'css', reference: { elementId: config.targetId, className: config.className }, targetId: config.targetId });
+                            } // Add 'removeClass' action if needed
+                        // --- GSAP (Placeholder - Code Removed) ---
+                        } else if (config.type === 'gsap') {
+                             console.warn(`GSAP animation type defined for ${config.targetId}, but GSAP code is not included in this script version.`);
+                             // If GSAP were included, the logic would go here.
+                        }
+                    } catch (error) { console.error(`Error triggering animation type ${config.type} on ${config.targetId}:`, error); }
+                });
+            }
+
+            function clearProgression() {
+                if (progressionListener) {
+                    if (currentTriggerType === 'click') {
+                        mainDialogueContainer.removeEventListener('click', progressionListener);
+                        document.body.removeEventListener('click', progressionListener); // Fallback if needed
+                    } else if (currentTriggerType === 'keypress') { document.removeEventListener('keydown', progressionListener); }
+                    else if (currentTriggerType === 'timer') { clearTimeout(progressionListener); }
+                    progressionListener = null; currentTriggerType = null;
+                    console.log("Progression listeners/timers cleared.");
+                }
+            }
+
+            function setupProgression(triggerConfig) {
+                clearProgression();
+                if (!triggerConfig) { console.log("No next trigger defined."); return; }
+                currentTriggerType = triggerConfig.type;
+                if (triggerConfig.type === 'click') {
+                    progressionListener = (event) => { if (event.target.tagName === 'A') return; nextStep(); };
+                    mainDialogueContainer.addEventListener('click', progressionListener, { once: true }); // Listen on dialogue box
+                    console.log("Setup click progression listener on dialogue container.");
+                } else if (triggerConfig.type === 'keypress') {
+                    progressionListener = (event) => { if (event.key === (triggerConfig.key || ' ')) { nextStep(); } };
+                    document.addEventListener('keydown', progressionListener); // Listen globally
+                    console.log(`Setup keypress progression listener for key: ${triggerConfig.key || 'Space'}`);
+                } else if (triggerConfig.type === 'timer') {
+                    progressionListener = setTimeout(nextStep, triggerConfig.duration || 5000);
+                    console.log(`Setup timer progression for duration: ${triggerConfig.duration || 5000}ms`);
+                }
+            }
+
+            function nextStep() {
+                console.log("Attempting nextStep...");
+                // --- STOP & CLEAR Previous Step's Non-Persistent Animations ---
+                activeStepAnimations.forEach(anim => {
+                    try {
+                        console.log(`Stopping [${anim.type}] on ${anim.targetId}`);
+                        switch (anim.type) {
+                            case 'smil': if (anim.reference?.endElement) anim.reference.endElement(); break;
+                            case 'css':
+                                const element = svgContainer.querySelector(`#${anim.reference.elementId}`);
+                                if (element && anim.reference.className) element.classList.remove(anim.reference.className); break;
+                            // case 'gsap': if (anim.reference?.kill) anim.reference.kill(); break; // GSAP code removed
+                        }
+                    } catch (error) { console.error(`Error stopping animation type ${anim.type} on ${anim.targetId}:`, error); }
+                });
+                activeStepAnimations = []; // Clear the array
+                console.log("Cleared active step animations.");
+
+                // --- Stop Synced SMIL (if user advanced early) ---
+                if (activeSyncedAnimationElement?.endElement) {
+                    activeSyncedAnimationElement.endElement();
+                    console.log(`Force-stopped synced SMIL animation: ${activeSyncedAnimationTargetId}`);
+                }
+                activeSyncedAnimationTargetId = null; activeSyncedAnimationElement = null;
+
+                // --- Clear Progression Listeners/Timers ---
+                clearProgression();
+
+                // --- Proceed to display the next step ---
+                displayStep(currentStepIndex + 1);
+            }
+
+            // --- Initiate Loading ---
+            loadScenario();
+        });
+    </script>
+    
+
+</body>
+</html>
